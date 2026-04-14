@@ -4,6 +4,9 @@ from PIL import Image, ImageTk
 import time
 import threading
 import cv2
+import os
+
+PATH = os.path.dirname(os.path.abspath(__file__))
 
 
 class FusionGUI:
@@ -174,7 +177,7 @@ class FusionGUI:
             self.root.after_cancel(self.connect_timeout_job)
 
         self.connect_timeout_job = self.root.after(
-            5000,
+            10000,
             lambda: self._stream_open_timeout(attempt_id, source)
         )
 
@@ -292,7 +295,7 @@ class FusionGUI:
         if fps is None or fps <= 0 or fps > 120:
             fps = 20.0
 
-        self.video_filename = f"{self.current_view.lower()}_video_{time.strftime('%Y%m%d_%H%M%S')}.avi"
+        self.video_filename = f"{PATH}/{self.current_view.lower()}_video_{time.strftime('%Y%m%d_%H%M%S')}.avi"
         fourcc = cv2.VideoWriter_fourcc(*"XVID")
 
         self.video_writer = cv2.VideoWriter(
@@ -416,7 +419,7 @@ class FusionGUI:
             self.log("ERROR: Capture failed — no frame received.", color="red")
             return
 
-        filename = f"{self.current_view.lower()}_snapshot_{time.strftime('%Y%m%d_%H%M%S')}.png"
+        filename = f"{PATH}/{self.current_view.lower()}_snapshot_{time.strftime('%Y%m%d_%H%M%S')}.png"
         saved = cv2.imwrite(filename, frame)
 
         if saved:
