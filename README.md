@@ -5,6 +5,8 @@
 > Real-time FIR + NIR fusion RTSP demo for Raspberry Pi: grayscale global-shutter stream + thermal stream alignment, fusion, and network publishing.
 >
 > 面向树莓派的 FIR + NIR 实时融合 RTSP 演示：将全局快门灰度流与热成像流进行时间对齐、融合并推流。
+>
+> Raspberry Pi için gerçek zamanlı FIR + NIR füzyon RTSP demosu: global-shutter gri akış ile termal akışın zaman eşleme, füzyon ve ağ üzerinden yayınlanması。
 
 ---
 
@@ -24,12 +26,20 @@ If you contribute using generative AI, please disclose it in your pull request d
 
 如果你在贡献中使用了生成式 AI，请在 PR 描述中披露（工具 + 范围），并确保你有权提交相关内容。
 
+**Türkçe**
+
+Bu depodaki bazı bölümler (ör. dokümantasyon, kod yorumları veya kod taslakları), üretken yapay zekâ araçlarının yardımıyla (örneğin GitHub Copilot / ChatGPT) oluşturulmuş veya iyileştirilmiş olabilir.
+Yapay zekâ destekli tüm çıktılar, depo bakımcıları tarafından gözden geçirilmiş, düzenlenmiş ve doğrulanmıştır; içerik doğruluğu, lisans uyumluluğu ve güvenlikten bakımcılar nihai olarak sorumludur.
+
+Eğer katkınızı üretken yapay zekâ ile hazırladıysanız, lütfen bunu pull request açıklamasında (araç + kapsam) belirtin ve içeriği gönderme haklarına sahip olduğunuzdan emin olun.
+
 ---
 
 ## Language / 语言切换
 
 - [English](#english)
 - [中文](#中文)
+- [Türkçe](#türkçe)
 
 ---
 
@@ -168,7 +178,8 @@ python3 fusion_RSTP.py --edge-mode joint-bilateral --jb-d 5 --jb-sigma-color 25 
 
 - **`RTSP.py` (legacy but useful in teaching/lab demos)**
   - Starts a GTK UI to publish **two RTSP streams** at once (`GS` and `Thermal`).
-  - Supports runtime adjustment of width/height/FPS/bitrate and video-device refresh.
+  - Supports runtime adjustment of width/height/FPS/bitrate, thermal decimal FPS via `videorate`, and video-device refresh.
+  - Automatically prefers `v4l2h264enc` when available and falls back to `x264enc`.
   - Typical launch:
 
     ```bash
@@ -325,7 +336,8 @@ python3 fusion_RSTP.py --edge-mode joint-bilateral --jb-d 5 --jb-sigma-color 25 
 
 - **`RTSP.py`（旧版但教学/实验常用）**
   - 启动 GTK 界面，同时发布两路 RTSP（`GS` 与 `Thermal`）。
-  - 支持在界面中调整分辨率、帧率、码率，并刷新视频设备列表。
+  - 支持在界面中调整分辨率、帧率、码率（热成像支持 `videorate` 小数帧率），并刷新视频设备列表。
+  - 编码器会优先尝试 `v4l2h264enc`，不可用时自动回退到 `x264enc`。
   - 常用启动命令：
 
     ```bash
@@ -350,3 +362,168 @@ python3 fusion_RSTP.py --edge-mode joint-bilateral --jb-d 5 --jb-sigma-color 25 
 ### 9. 第三方代码说明
 
 `Thirdparty/v4l2lepton_by_groupgets_modified/` 目录提供了 Lepton 相关工具，可用于构建热成像输入链路。
+
+
+---
+
+## Türkçe
+
+### 1. Projenin yaptığı işler (en güncel sürüme göre)
+
+Mevcut ana betik **`fusion_RSTP.py`** dosyasıdır ve şu işleri yapar:
+
+1. `libcamerasrc` ile global-shutter gri görüntü akışını alır.
+2. `v4l2src` ile termal akışı alır (varsayılan `/dev/video42`).
+3. Termal yoğunluğu yüzde dilim kırpmasıyla (`p_low/p_high`) normalize eder.
+4. GS kareleri ile termal kareleri en yakın zaman damgasına göre eşler, toleransı `delta-ms` ile sınırlar.
+5. Füzyon çıktısını kodlayıp tek bir RTSP akışı olarak yayınlar.
+
+Depodaki diğer betikler:
+- `RTSP.py`: GTK tabanlı çift RTSP arayüzü (`/gs` + `/thermal`), parametre ayarı demoları için uygundur.
+- `gs_demo.py`: GS yerel önizleme/kayıt aracı (60 FPS hedefi, ekran görüntüsü ve bitrate kısayolları).
+- `GUI.py`: Arayüz akışını denemek için hafif Tkinter kontrol paneli prototipi.
+
+---
+
+### 2. Bağımlılık kurulumu
+
+#### 2.1 Sistem paketleri
+
+```bash
+sudo apt update
+sudo apt install -y \
+  python3-pip python3-opencv python3-gi python3-gi-cairo \
+  gir1.2-gstreamer-1.0 gir1.2-gst-rtsp-server-1.0 \
+  gstreamer1.0-tools gstreamer1.0-plugins-base \
+  gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+  gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+  ffmpeg
+```
+
+> `--edge-mode guided` veya `--edge-mode joint-bilateral` için OpenCV'nin `ximgproc` desteğiyle kurulmuş olması gerekir (genellikle opencv-contrib).
+
+#### 2.2 Python paketleri
+
+```bash
+python3 -m pip install --upgrade pip
+python3 -m pip install numpy
+```
+
+---
+
+### 3. Hızlı başlangıç (füzyon RTSP)
+
+```bash
+python3 fusion_RSTP.py \
+  --port 8554 \
+  --path /fusion \
+  --gs-w 1280 --gs-h 720 --gs-fps 30 \
+  --th-dev /dev/video42
+```
+
+VLC/ffplay ile açmak için:
+
+- `rtsp://<PI_IP>:8554/fusion`
+
+Başlangıç loglarında şunlar görünür:
+- RTSP URL
+- guided/joint-bilateral kullanılabilirlik durumu
+- aktif edge mode
+
+---
+
+### 4. Temel CLI seçenekleri (`fusion_RSTP.py`)
+
+| Seçenek | Varsayılan | Anlamı |
+|---|---:|---|
+| `--port` | `8554` | RTSP portu |
+| `--path` | `/fusion` | RTSP yayın yolu |
+| `--gs-w` / `--gs-h` | `1280` / `720` | GS çıkış çözünürlüğü |
+| `--gs-fps` | `30` | GS yakalama/çıkış FPS |
+| `--th-dev` | `/dev/video42` | Termal cihaz |
+| `--alpha` | `0.35` | Füzyon alfa değeri |
+| `--delta-ms` | `40.0` | Termal yenileme için maksimum zaman farkı |
+| `--th-buf-len` | `16` | Termal halka tampon uzunluğu |
+| `--p-low` / `--p-high` | `2.0` / `98.0` | Termal yüzde normalize sınırları |
+| `--colormap` | `inferno` | Termal renk haritası (`jet/turbo/inferno/magma/plasma/viridis`) |
+| `--blend-mode` | `add` | Karışım modu (`add` veya `mix`) |
+| `--edge-mode` | `none` | Kenar iyileştirme (`none/guided/joint-bilateral`) |
+| `--gf-radius` / `--gf-eps` | `4` / `1e-3` | Guided filter parametreleri |
+| `--jb-d` / `--jb-sigma-color` / `--jb-sigma-space` | `5` / `25.0` / `7.0` | Joint bilateral parametreleri |
+| `--bitrate-kbps` | `4000` | x264 bitrate |
+
+---
+
+### 5. Füzyon pipeline detayları
+
+- **GS giriş hattı**: `libcamerasrc -> videobalance saturation=0 -> videoconvert -> appsink`
+- **Termal giriş hattı**: `v4l2src -> videoconvert -> appsink`
+- Termal kareler griye çevrilir ve yüzde esnetme ile normalize edilir.
+- Füzyon durumu termal deque tutar, zaman damgasına göre en yakın kareyi seçer.
+- `delta-ms` içinde geçerli yeni termal kare yoksa son geçerli overlay korunur.
+- Çıkış `x264enc` ile kodlanır ve `rtph264pay` üzerinden RTSP ile yayınlanır.
+
+---
+
+### 6. Örnek komutlar
+
+**Düşük gecikme varsayılanı**
+```bash
+python3 fusion_RSTP.py --port 8554 --path /fusion
+```
+
+**Daha keskin sınırlar (ximgproc varsa)**
+```bash
+python3 fusion_RSTP.py --edge-mode guided --gf-radius 4 --gf-eps 1e-3
+```
+
+**Joint bilateral termal iyileştirme**
+```bash
+python3 fusion_RSTP.py --edge-mode joint-bilateral --jb-d 5 --jb-sigma-color 25 --jb-sigma-space 7
+```
+
+---
+
+### 7. Sorun giderme
+
+1. **`ModuleNotFoundError: gi`**
+   - `python3-gi`, `gir1.2-gstreamer-1.0`, `gir1.2-gst-rtsp-server-1.0` paketlerini yeniden kurun.
+2. **RTSP bağlanıyor ama görüntü yok/siyah**
+   - `libcamerasrc` ve termal `/dev/video*` kaynaklarını ayrı ayrı `gst-launch-1.0` ile doğrulayın.
+3. **`guided` / `joint-bilateral` etkisiz**
+   - OpenCV yapınızda `ximgproc` olmayabilir; betik otomatik `none` moduna döner.
+4. **Gecikme yüksek**
+   - `--gs-w/--gs-h` değerini düşürün, `--bitrate-kbps` azaltın, Pi üzerinde ısıl kısma olmadığını kontrol edin.
+
+---
+
+### 8. Depodaki diğer betikler
+
+- **`RTSP.py` (eski ama eğitim/lab demolarında faydalı)**
+  - GTK arayüzüyle aynı anda **iki RTSP akışı** yayınlar (`GS` ve `Thermal`).
+  - Genişlik/yükseklik/FPS/bitrate ayarı, termalde `videorate` ile ondalıklı FPS ve video aygıt listesi yenileme desteklenir.
+  - Kodlayıcı olarak mümkünse `v4l2h264enc` seçilir, yoksa `x264enc` kullanılır.
+  - Tipik kullanım:
+
+    ```bash
+    python3 RTSP.py --port 8554 --gs-path /gs --th-path /thermal
+    ```
+
+- **`gs_demo.py` (tek kamera yerel doğrulama)**
+  - Picamera2 + OpenCV ile yerel önizleme, OSD ve isteğe bağlı kayıt sağlar.
+  - Kısayollar: `Q/Esc` çıkış, `R` kayıt aç/kapat, `S` görüntü kaydet, `+/-` bitrate ayarı.
+  - Tipik kullanım:
+
+    ```bash
+    python3 gs_demo.py
+    ```
+
+- **`GUI.py` (arayüz prototipi)**
+  - Güç durumu, görünüm seçimi ve temel operatör akışı için Tkinter tabanlı kontrol paneli taslağı.
+  - Daha zengin bir entegre ön yüz geliştirmek için başlangıç noktası olarak kullanılabilir.
+
+---
+
+### 9. Üçüncü parti kod notu
+
+`Thirdparty/v4l2lepton_by_groupgets_modified/` klasörü Lepton ile ilgili araçlar içerir ve termal giriş hattını oluşturmak için kullanılabilir.
