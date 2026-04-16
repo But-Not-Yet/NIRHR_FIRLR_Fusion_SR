@@ -26,6 +26,13 @@ If you contribute using generative AI, please disclose it in your pull request d
 
 如果你在贡献中使用了生成式 AI，请在 PR 描述中披露（工具 + 范围），并确保你有权提交相关内容。
 
+**Türkçe**
+
+Bu depodaki bazı bölümler (ör. dokümantasyon, kod yorumları veya kod taslakları), üretken yapay zekâ araçlarının yardımıyla (örneğin GitHub Copilot / ChatGPT) oluşturulmuş veya iyileştirilmiş olabilir.
+Yapay zekâ destekli tüm çıktılar, depo bakımcıları tarafından gözden geçirilmiş, düzenlenmiş ve doğrulanmıştır; içerik doğruluğu, lisans uyumluluğu ve güvenlikten bakımcılar nihai olarak sorumludur.
+
+Eğer katkınızı üretken yapay zekâ ile hazırladıysanız, lütfen bunu pull request açıklamasında (araç + kapsam) belirtin ve içeriği gönderme haklarına sahip olduğunuzdan emin olun.
+
 ---
 
 ## Language / 语言切换
