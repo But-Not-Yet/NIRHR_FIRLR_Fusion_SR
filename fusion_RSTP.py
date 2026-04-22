@@ -231,7 +231,6 @@ class FusionState:
             entry = self._build_thermal_entry(th_bgr, ts_ns, out_w, out_h)
             self.th_buf.append(entry)
 
-            # For edge_mode=none, we can "hold" the latest overlay immediately (no dependence on GS).
             if self.edge_mode == "none" and entry.get("overlay_noedge") is not None:
                 self.held_overlay = entry["overlay_noedge"]
                 self.held_ts = ts_ns
@@ -255,9 +254,6 @@ class FusionState:
                 entry["overlay_noedge"] = cv2.applyColorMap(entry["th8_up"], self.colormap)
             return entry["overlay_noedge"]
 
-        # NOTE: guided/joint-bilateral depend on current GS frame as guide.
-        # Do NOT cache these overlays in the thermal entry; caching would reuse an overlay
-        # refined against an old GS frame, producing visible "ghosting" when GS changes.
         if self.edge_mode == "guided":
             guide = cv2.cvtColor(gs_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
             src = entry["th8_up"].astype(np.float32) / 255.0
@@ -278,7 +274,6 @@ class FusionState:
             th8_ref = np.clip(th8_ref, 0, 255).astype(np.uint8)
             return cv2.applyColorMap(th8_ref, self.colormap)
 
-        # Fallback
         if entry["overlay_noedge"] is None:
             entry["overlay_noedge"] = cv2.applyColorMap(entry["th8_up"], self.colormap)
         return entry["overlay_noedge"]
@@ -298,7 +293,6 @@ class FusionState:
         pick = self._pick_nearest_thermal_entry(gs_ts_ns)
         if pick is not None:
             dt, entry = pick
-            # Update held overlay only when within delta window.
             if dt <= self.delta_ns and entry["ts"] != held_ts:
                 overlay = self._overlay_from_entry(entry, gs_bgr, out_w, out_h)
                 with self.lock:
@@ -307,7 +301,6 @@ class FusionState:
                     held_overlay = overlay
                     held_ts = entry["ts"]
 
-        # IMPORTANT: do NOT apply stale overlay (dt > delta). This is the main "ghosting" reducer.
         overlay_valid = (
             held_overlay is not None
             and held_ts is not None
@@ -323,7 +316,6 @@ class FusionState:
             else:
                 fused = cv2.addWeighted(gs_bgr, 1.0 - a, held_overlay, a, 0.0)
 
-        # Debug dt overlay (shows even when stale so you can tune delta-ms)
         if held_ts is not None:
             dt_ms = abs(gs_ts_ns - held_ts) / 1e6
             tag = "" if dt_ms <= (self.delta_ns / 1e6) else " STALE"
@@ -408,7 +400,8 @@ class FusionFactory(GstRtspServer.RTSPMediaFactory):
         self.state.set_appsrc(appsrc, self.width, self.height, self.fps)
 
 
-def make_capture_pipeline(gs_w: int, gs_h: int, gs_fps: int, th_dev: str) -> Gst.Pipeline:
+# MODIFIED: thermal capture width/height are now parameters
+def make_capture_pipeline(gs_w: int, gs_h: int, gs_fps: int, th_dev: str, th_w: int, th_h: int) -> Gst.Pipeline:
     """
     Single pipeline with two independent branches:
       - GS: libcamerasrc -> appsink(gssink)
@@ -424,13 +417,12 @@ def make_capture_pipeline(gs_w: int, gs_h: int, gs_fps: int, th_dev: str) -> Gst
         f"! videoconvert ! video/x-raw,format=BGR "
         f"! appsink name=gssink emit-signals=true max-buffers=1 drop=true sync=false "
         f"v4l2src name=thsrc device={th_dev} do-timestamp=true "
-        f"! video/x-raw,format=RGB,width=160,height=120 "
+        f"! video/x-raw,format=RGB,width={th_w},height={th_h} "
         f"! queue leaky=downstream max-size-buffers=1 "
         f"! videoconvert ! video/x-raw,format=BGR "
         f"! appsink name=thsink emit-signals=true max-buffers=1 drop=true sync=false"
     )
 
-    # libcamerasrc do-timestamp property may vary by build; enable only if present.
     gssrc = pipe.get_by_name("gssrc")
     if gssrc is not None and gssrc.find_property("do-timestamp") is not None:
         gssrc.set_property("do-timestamp", True)
@@ -481,7 +473,7 @@ def main():
         jb_sigma_space=args.jb_sigma_space,
     )
 
-    # RTSP server
+    # RTSP server (output stays 1280x720 by default)
     server = GstRtspServer.RTSPServer()
     server.props.address = "0.0.0.0"
     server.props.service = str(args.port)
@@ -492,8 +484,13 @@ def main():
     mounts.add_factory(args.path, factory)
     server.attach(None)
 
-    # Single capture pipeline (GS + TH)
-    cap_pipe = make_capture_pipeline(args.gs_w, args.gs_h, args.gs_fps, args.th_dev)
+    # MODIFIED: capture in portrait, then rotate each frame clockwise
+    gs_cap_w = args.gs_h   # 720
+    gs_cap_h = args.gs_w   # 1280
+    th_cap_w = 120         # portrait thermal width
+    th_cap_h = 160         # portrait thermal height
+
+    cap_pipe = make_capture_pipeline(gs_cap_w, gs_cap_h, args.gs_fps, args.th_dev, th_cap_w, th_cap_h)
     attach_bus_logger(cap_pipe, "CAP")
 
     gssink = cap_pipe.get_by_name("gssink")
@@ -502,17 +499,21 @@ def main():
         print("[CAP][ERROR] failed to get appsinks (gssink/thsink)")
         return
 
+    # MODIFIED: rotate TH frame clockwise before fusion pipeline
     def on_th_sample(sink):
         sample = sink.emit("pull-sample")
         frame = sample_to_bgr(sample)
         if frame is not None:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
             state.update_thermal(frame, ts_from_sample(sample))
         return Gst.FlowReturn.OK
 
+    # MODIFIED: rotate GS frame clockwise before fusion pipeline
     def on_gs_sample(sink):
         sample = sink.emit("pull-sample")
         frame = sample_to_bgr(sample)
         if frame is not None:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
             state.fuse_from_gs(frame, ts_from_sample(sample))
         return Gst.FlowReturn.OK
 
@@ -522,6 +523,9 @@ def main():
     cap_pipe.set_state(Gst.State.PLAYING)
 
     print(f"Fusion RTSP: rtsp://127.0.0.1:{args.port}{args.path}")
+    print(f"Output size: {args.gs_w}x{args.gs_h}")
+    print(f"GS capture size before rotation: {gs_cap_w}x{gs_cap_h}")
+    print(f"TH capture size before rotation: {th_cap_w}x{th_cap_h}")
     print(f"guidedFilter available: {have_guided_filter()}")
     print(f"jointBilateralFilter available: {have_joint_bilateral()}")
     print(f"edge-mode: {state.edge_mode}")
