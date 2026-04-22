@@ -1,6 +1,7 @@
 # NIRHR_FIRLR_Fusion_SR
-
-![FIR-NIR Fusion Demo](Assets/1.jpg)
+<p align="center">
+  <img src="Assets/1.jpg" alt="FIR-NIR Fusion Demo" width="800">
+</p>
 
 > Real-time FIR + NIR fusion RTSP demo for Raspberry Pi: grayscale global-shutter stream + thermal stream alignment, fusion, and network publishing.
 >
@@ -9,6 +10,12 @@
 > Raspberry Pi için gerçek zamanlı FIR + NIR füzyon RTSP demosu: global-shutter gri akış ile termal akışın zaman eşleme, füzyon ve ağ üzerinden yayınlanması。
 
 ---
+
+## Workflow
+
+<p align="center">
+  <img src="Assets/2.svg" alt="Workflow" width="800">
+</p>
 
 ## AI Assistance / AI 辅助声明
 
@@ -42,6 +49,11 @@ Eğer katkınızı üretken yapay zekâ ile hazırladıysanız, lütfen bunu pul
 - [Türkçe](#türkçe)
 
 ---
+## Fusion Process Demo
+
+<p align="center">
+  <img src="Assets/3.svg" alt="Fusion Demo" width="800">
+</p>
 
 ## English
 
