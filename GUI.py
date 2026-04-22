@@ -9,6 +9,10 @@ import os
 PATH = os.path.dirname(os.path.abspath(__file__))
 
 
+def is_rtsp_source(source):
+    return isinstance(source, str) and source.lower().startswith("rtsp://")
+
+
 class FusionGUI:
     def __init__(self, root):
         self.root = root
@@ -24,6 +28,12 @@ class FusionGUI:
         self._tk_img = None
         self.connect_timeout_job = None
         self.open_attempt_id = 0
+
+        # ---- Low-latency reader state ----
+        self.latest_frame = None
+        self.frame_lock = threading.Lock()
+        self.reader_thread = None
+        self.reader_running = False
 
         # ---- Recording state ----
         self.recording = False
@@ -106,6 +116,7 @@ class FusionGUI:
         self.log_console = scrolledtext.ScrolledText(self.bottom_frame, height=5, state="disabled")
         self.log_console.pack(fill="both", padx=10, pady=5)
 
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self._refresh_screen_text()
 
     # ---------- Logging ----------
@@ -139,6 +150,23 @@ class FusionGUI:
             return False
         return True
 
+    def _get_latest_frame(self):
+        with self.frame_lock:
+            if self.latest_frame is None:
+                return None
+            return self.latest_frame.copy()
+
+    # ---------- Background reader ----------
+    def _reader_loop(self):
+        while self.reader_running and self.cap is not None:
+            ok, frame = self.cap.read()
+            if not ok or frame is None:
+                time.sleep(0.005)
+                continue
+
+            with self.frame_lock:
+                self.latest_frame = frame
+
     # ---------- Streaming ----------
     def _start_stream(self, source):
         self._stop_stream()
@@ -151,16 +179,32 @@ class FusionGUI:
 
         def worker():
             cap = None
+            first_frame = None
             error_msg = None
 
             try:
-                cap = cv2.VideoCapture(source)
+                if is_rtsp_source(source):
+                    cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+                    if cap is None or not cap.isOpened():
+                        if cap is not None:
+                            try:
+                                cap.release()
+                            except Exception:
+                                pass
+                        cap = cv2.VideoCapture(source)
+                else:
+                    cap = cv2.VideoCapture(source)
 
-                if not cap.isOpened():
+                if cap is None or not cap.isOpened():
                     error_msg = f"Failed to open stream: {source}"
                 else:
-                    ok, frame = cap.read()
-                    if not ok or frame is None:
+                    try:
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    except Exception:
+                        pass
+
+                    ok, first_frame = cap.read()
+                    if not ok or first_frame is None:
                         error_msg = f"Opened stream but no frame was received: {source}"
 
             except Exception as e:
@@ -168,7 +212,7 @@ class FusionGUI:
 
             self.root.after(
                 0,
-                lambda: self._finish_stream_open(attempt_id, source, cap, error_msg)
+                lambda: self._finish_stream_open(attempt_id, source, cap, first_frame, error_msg)
             )
 
         threading.Thread(target=worker, daemon=True).start()
@@ -194,7 +238,7 @@ class FusionGUI:
             self.root.after_cancel(self.connect_timeout_job)
             self.connect_timeout_job = None
 
-    def _finish_stream_open(self, attempt_id, source, cap, error_msg):
+    def _finish_stream_open(self, attempt_id, source, cap, first_frame, error_msg):
         if attempt_id != self.open_attempt_id:
             if cap is not None:
                 try:
@@ -221,6 +265,14 @@ class FusionGUI:
 
         self.cap = cap
         self.streaming = True
+
+        with self.frame_lock:
+            self.latest_frame = first_frame
+
+        self.reader_running = True
+        self.reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self.reader_thread.start()
+
         self.log(f"Streaming started: {source}")
         self.image_label.config(text="")
         self._stream_loop()
@@ -228,12 +280,20 @@ class FusionGUI:
     def _stop_stream(self):
         self.stop_recording(silent=True)
         self.streaming = False
+        self.reader_running = False
 
         if self.connect_timeout_job is not None:
             self.root.after_cancel(self.connect_timeout_job)
             self.connect_timeout_job = None
 
         self.open_attempt_id += 1
+
+        if self.reader_thread is not None and self.reader_thread.is_alive():
+            try:
+                self.reader_thread.join(timeout=0.2)
+            except Exception:
+                pass
+        self.reader_thread = None
 
         if self.cap is not None:
             try:
@@ -242,12 +302,16 @@ class FusionGUI:
                 pass
             self.cap = None
 
+        with self.frame_lock:
+            self.latest_frame = None
+
     def _stream_loop(self):
         if not self.streaming or self.cap is None:
             return
 
-        ok, frame = self.cap.read()
-        if ok and frame is not None:
+        frame = self._get_latest_frame()
+
+        if frame is not None:
             if self.recording and self.video_writer is not None:
                 try:
                     self.video_writer.write(frame)
@@ -267,9 +331,9 @@ class FusionGUI:
             self._tk_img = ImageTk.PhotoImage(img)
             self.image_label.config(image=self._tk_img, text="")
         else:
-            self.image_label.config(image="", text="(no frame received)", fg="white", bg="black")
+            self.image_label.config(image="", text="(waiting for frame)", fg="white", bg="black")
 
-        self.root.after(33, self._stream_loop)
+        self.root.after(15, self._stream_loop)
 
     # ---------- Button callbacks ----------
     def start_recording(self):
@@ -284,8 +348,8 @@ class FusionGUI:
             self.log("ERROR: Video recording is already in progress.", color="red")
             return
 
-        ok, frame = self.cap.read()
-        if not ok or frame is None:
+        frame = self._get_latest_frame()
+        if frame is None:
             self.log("ERROR: Could not start recording — no frame received.", color="red")
             return
 
@@ -414,8 +478,8 @@ class FusionGUI:
             self.log("ERROR: No live stream active — cannot capture.", color="red")
             return
 
-        ok, frame = self.cap.read()
-        if not ok or frame is None:
+        frame = self._get_latest_frame()
+        if frame is None:
             self.log("ERROR: Capture failed — no frame received.", color="red")
             return
 
@@ -426,6 +490,13 @@ class FusionGUI:
             self.log(f"Saved snapshot: {filename}")
         else:
             self.log("ERROR: Failed to save snapshot. Check file permissions/location.", color="red")
+
+    def on_close(self):
+        try:
+            self.cmd_power_off()
+        except Exception:
+            pass
+        self.root.destroy()
 
 
 if __name__ == "__main__":
