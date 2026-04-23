@@ -291,15 +291,37 @@ class FusionState:
             gs_bgr = cv2.resize(gs_bgr, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
 
         pick = self._pick_nearest_thermal_entry(gs_ts_ns)
+        current_overlay = None
+        current_ts = None
+        current_dt = None
+        current_entry = None
+
         if pick is not None:
             dt, entry = pick
-            if dt <= self.delta_ns and entry["ts"] != held_ts:
-                overlay = self._overlay_from_entry(entry, gs_bgr, out_w, out_h)
-                with self.lock:
-                    self.held_overlay = overlay
-                    self.held_ts = entry["ts"]
-                    held_overlay = overlay
-                    held_ts = entry["ts"]
+            current_dt = dt
+            current_entry = entry
+
+            if dt <= self.delta_ns:
+                # For guided / joint-bilateral, recompute on every GS frame,
+                # because the current GS frame is the guide.
+                if self.edge_mode in ("guided", "joint-bilateral"):
+                    current_overlay = self._overlay_from_entry(entry, gs_bgr, out_w, out_h)
+                    current_ts = entry["ts"]
+                else:
+                    # edge_mode == none
+                    if entry["ts"] != held_ts:
+                        current_overlay = self._overlay_from_entry(entry, gs_bgr, out_w, out_h)
+                        current_ts = entry["ts"]
+                    else:
+                        current_overlay = held_overlay
+                        current_ts = held_ts
+
+        if current_overlay is not None and current_ts is not None:
+            with self.lock:
+                self.held_overlay = current_overlay
+                self.held_ts = current_ts
+                held_overlay = current_overlay
+                held_ts = current_ts
 
         overlay_valid = (
             held_overlay is not None
@@ -307,14 +329,27 @@ class FusionState:
             and abs(gs_ts_ns - held_ts) <= self.delta_ns
         )
 
-        if not overlay_valid:
-            fused = gs_bgr
-        else:
+        if overlay_valid:
             a = self.alpha
             if self.blend_mode == "add":
                 fused = cv2.addWeighted(gs_bgr, 1.0, held_overlay, a, 0.0)
             else:
                 fused = cv2.addWeighted(gs_bgr, 1.0 - a, held_overlay, a, 0.0)
+        else:
+            # Fallback: if we have a nearby thermal frame, at least show direct thermal overlay
+            if current_entry is not None and current_dt is not None and current_dt <= self.delta_ns:
+                self._ensure_entry_size(current_entry, out_w, out_h)
+                fallback_overlay = current_entry.get("overlay_noedge")
+                if fallback_overlay is None:
+                    fallback_overlay = cv2.applyColorMap(current_entry["th8_up"], self.colormap)
+
+                a = self.alpha
+                if self.blend_mode == "add":
+                    fused = cv2.addWeighted(gs_bgr, 1.0, fallback_overlay, a, 0.0)
+                else:
+                    fused = cv2.addWeighted(gs_bgr, 1.0 - a, fallback_overlay, a, 0.0)
+            else:
+                fused = gs_bgr
 
         if held_ts is not None:
             dt_ms = abs(gs_ts_ns - held_ts) / 1e6
