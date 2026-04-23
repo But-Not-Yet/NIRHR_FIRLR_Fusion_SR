@@ -400,7 +400,6 @@ class FusionFactory(GstRtspServer.RTSPMediaFactory):
         self.state.set_appsrc(appsrc, self.width, self.height, self.fps)
 
 
-# MODIFIED: thermal capture width/height are now parameters
 def make_capture_pipeline(gs_w: int, gs_h: int, gs_fps: int, th_dev: str, th_w: int, th_h: int) -> Gst.Pipeline:
     """
     Single pipeline with two independent branches:
@@ -434,9 +433,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8554)
     ap.add_argument("--path", type=str, default="/fusion")
-    ap.add_argument("--gs-w", type=int, default=1280)
-    ap.add_argument("--gs-h", type=int, default=720)
+
+    # Native GS sensor mode you found from rpicam-hello --list-cameras
+    ap.add_argument("--gs-w", type=int, default=1456)
+    ap.add_argument("--gs-h", type=int, default=1088)
     ap.add_argument("--gs-fps", type=int, default=30)
+
     ap.add_argument("--th-dev", type=str, default="/dev/video42")
 
     ap.add_argument("--alpha", type=float, default=0.35)
@@ -473,22 +475,26 @@ def main():
         jb_sigma_space=args.jb_sigma_space,
     )
 
-    # RTSP server (output stays 1280x720 by default)
+    # Output becomes portrait after 90-degree clockwise rotation
+    out_w = args.gs_h   # 1088
+    out_h = args.gs_w   # 1456
+
+    # RTSP server
     server = GstRtspServer.RTSPServer()
     server.props.address = "0.0.0.0"
     server.props.service = str(args.port)
     mounts = server.get_mount_points()
 
-    factory = FusionFactory(state, args.gs_w, args.gs_h, args.gs_fps, args.bitrate_kbps)
+    factory = FusionFactory(state, out_w, out_h, args.gs_fps, args.bitrate_kbps)
     factory.attach_media_callbacks()
     mounts.add_factory(args.path, factory)
     server.attach(None)
 
-    # MODIFIED: capture in portrait, then rotate each frame clockwise
-    gs_cap_w = args.gs_h   # 720
-    gs_cap_h = args.gs_w   # 1280
-    th_cap_w = 120         # portrait thermal width
-    th_cap_h = 160         # portrait thermal height
+    # Native capture sizes (do not fake portrait caps)
+    gs_cap_w = args.gs_w
+    gs_cap_h = args.gs_h
+    th_cap_w = 160
+    th_cap_h = 120
 
     cap_pipe = make_capture_pipeline(gs_cap_w, gs_cap_h, args.gs_fps, args.th_dev, th_cap_w, th_cap_h)
     attach_bus_logger(cap_pipe, "CAP")
@@ -499,7 +505,6 @@ def main():
         print("[CAP][ERROR] failed to get appsinks (gssink/thsink)")
         return
 
-    # MODIFIED: rotate TH frame clockwise before fusion pipeline
     def on_th_sample(sink):
         sample = sink.emit("pull-sample")
         frame = sample_to_bgr(sample)
@@ -508,7 +513,6 @@ def main():
             state.update_thermal(frame, ts_from_sample(sample))
         return Gst.FlowReturn.OK
 
-    # MODIFIED: rotate GS frame clockwise before fusion pipeline
     def on_gs_sample(sink):
         sample = sink.emit("pull-sample")
         frame = sample_to_bgr(sample)
@@ -523,9 +527,9 @@ def main():
     cap_pipe.set_state(Gst.State.PLAYING)
 
     print(f"Fusion RTSP: rtsp://127.0.0.1:{args.port}{args.path}")
-    print(f"Output size: {args.gs_w}x{args.gs_h}")
-    print(f"GS capture size before rotation: {gs_cap_w}x{gs_cap_h}")
-    print(f"TH capture size before rotation: {th_cap_w}x{th_cap_h}")
+    print(f"Output size after rotation: {out_w}x{out_h}")
+    print(f"GS native capture size: {gs_cap_w}x{gs_cap_h}")
+    print(f"TH native capture size: {th_cap_w}x{th_cap_h}")
     print(f"guidedFilter available: {have_guided_filter()}")
     print(f"jointBilateralFilter available: {have_joint_bilateral()}")
     print(f"edge-mode: {state.edge_mode}")
