@@ -470,15 +470,15 @@ def main():
     ap.add_argument("--path", type=str, default="/fusion")
 
     # Native GS sensor mode you found from rpicam-hello --list-cameras
-    ap.add_argument("--gs-w", type=int, default=1456)
-    ap.add_argument("--gs-h", type=int, default=1088)
-    ap.add_argument("--gs-fps", type=int, default=30)
+    ap.add_argument("--gs-w", type=int, default=1024)
+    ap.add_argument("--gs-h", type=int, default=768)
+    ap.add_argument("--gs-fps", type=int, default=60)
 
     ap.add_argument("--th-dev", type=str, default="/dev/video42")
 
     ap.add_argument("--alpha", type=float, default=0.35)
     ap.add_argument("--delta-ms", type=float, default=40.0)
-    ap.add_argument("--th-buf-len", type=int, default=16)
+    ap.add_argument("--th-buf-len", type=int, default=64)
     ap.add_argument("--p-low", type=float, default=2.0)
     ap.add_argument("--p-high", type=float, default=98.0)
     ap.add_argument("--colormap", type=str, default="inferno")
