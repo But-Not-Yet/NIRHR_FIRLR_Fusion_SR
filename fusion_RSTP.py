@@ -469,10 +469,12 @@ def main():
     ap.add_argument("--port", type=int, default=8554)
     ap.add_argument("--path", type=str, default="/fusion")
 
-    # Native GS sensor mode you found from rpicam-hello --list-cameras
     ap.add_argument("--gs-w", type=int, default=1024)
     ap.add_argument("--gs-h", type=int, default=768)
-    ap.add_argument("--gs-fps", type=int, default=60)
+    ap.add_argument("--gs-fps", type=int, default=30)
+
+    ap.add_argument("--gs-native-w", type=int, default=1456)
+    ap.add_argument("--gs-native-h", type=int, default=1088)
 
     ap.add_argument("--th-dev", type=str, default="/dev/video42")
 
@@ -510,9 +512,8 @@ def main():
         jb_sigma_space=args.jb_sigma_space,
     )
 
-    # Output becomes portrait after 90-degree clockwise rotation
-    out_w = args.gs_h   # 1088
-    out_h = args.gs_w   # 1456
+    out_w = args.gs_h
+    out_h = args.gs_w
 
     # RTSP server
     server = GstRtspServer.RTSPServer()
@@ -525,9 +526,8 @@ def main():
     mounts.add_factory(args.path, factory)
     server.attach(None)
 
-    # Native capture sizes (do not fake portrait caps)
-    gs_cap_w = args.gs_w
-    gs_cap_h = args.gs_h
+    gs_cap_w = args.gs_native_w
+    gs_cap_h = args.gs_native_h
     th_cap_w = 160
     th_cap_h = 120
 
@@ -562,8 +562,9 @@ def main():
     cap_pipe.set_state(Gst.State.PLAYING)
 
     print(f"Fusion RTSP: rtsp://127.0.0.1:{args.port}{args.path}")
-    print(f"Output size after rotation: {out_w}x{out_h}")
     print(f"GS native capture size: {gs_cap_w}x{gs_cap_h}")
+    print(f"GS software target size before rotation: {args.gs_w}x{args.gs_h}")
+    print(f"Output size after rotation: {out_w}x{out_h}")
     print(f"TH native capture size: {th_cap_w}x{th_cap_h}")
     print(f"guidedFilter available: {have_guided_filter()}")
     print(f"jointBilateralFilter available: {have_joint_bilateral()}")
